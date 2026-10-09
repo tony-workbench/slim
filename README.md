@@ -1,3 +1,11 @@
+## About this fork
+
+This fork is based on [SLiM](https://github.com/Paramathic/slim). The method, paper, and experimental results below belong to the upstream research authors.
+
+Tony's changes in this fork are limited to [Dockerfile](Dockerfile), [requirements.txt](requirements.txt), and [app.py](app.py). The current `app.py` defines only a FastAPI health endpoint at `/`; a model-compression API and deployment have not been verified.
+
+---
+
 <div align="center">
 <img src="./assets/SLiM-Logo.png" alt="SLiM" width="300">  
 </div>
