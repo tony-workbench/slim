@@ -1,0 +1,10 @@
+.git
+.venv
+__pycache__
+checkpoints
+wandb
+output
+results
+*.out
+.env
+llm_weights

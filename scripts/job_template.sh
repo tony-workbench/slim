@@ -1,0 +1,167 @@
+#!/bin/bash
+#SBATCH --nodes=1
+#SBATCH --account=rrg-mmehride
+#SBATCH --job-name=slim # Base name, will be overridden by submit_jobs.sh
+
+echo "SLURM Job $SLURM_JOB_ID started at $(date)"
+
+ARG_MODEL_NAME="${1:-'meta-llama/Llama-3.2-1B'}"
+ARG_STRUCTURE="${2:-'2:4'}"
+ARG_SPARSITY_RATIO="${3:-0.5}"
+ARG_METHOD="${4:-wanda}"
+ARG_LORA_RANK="${5:-0.0}"
+ARG_SLIM_LORA="${6:-'false'}"
+ARG_SEPARATE_LORA="${7:-'true'}"
+ARG_QUANTIZE_LORA="${8:-'false'}"
+ARG_LORA_TILE_SIZE="${9:-128}"
+ARG_PAD_LORA="${10:-'true'}"
+ARG_CALIBRATION_DATASET="${11:-c4}"
+ARG_NUM_CALIBRATION_SAMPLES="${12:-128}"
+ARG_QUANTIZE_WEIGHT="${13:-'false'}"
+ARG_BITWIDTH="${14:-4}"
+ARG_TILED_WEIGHT_QUANTIZATION="${15:-'false'}"
+ARG_WEIGHT_TILE_SIZE="${16:-128}"
+ARG_SLIM_QUANT="${17:-'false'}"
+ARG_LOCAL_FILES_ONLY="${18:-'false'}"
+ARG_EVAL_DATASET="${19:-wikitext2}"
+ARG_EVALUATE_PERPLEXITY="${20:-'true'}"
+ARG_TEST_LMHARNESS="${21:-'false'}"
+ARG_LM_HARNESS_TASKS="${22:-'mmlu piqa arc_easy arc_challenge winogrande openbookqa'}"
+ARG_FINE_TUNE="${23:-'false'}"
+ARG_OPTIMIZER="${24:-adafactor}"
+ARG_SCALE_IMPORTANT_WEIGHTS="${25:-'false'}"
+ARG_MASKLLM_CHECKPOINT="${26:-""}"
+ARG_QUANTIZE_INPUT="${27:-'false'}"
+ARG_INPUT_BITWIDTH="${28:-8}"
+ARG_INPUT_GROUP_SIZE="${29:-128}"
+ARG_JOINT_PQ_MIXING_FACTOR="${30:-2.1}"
+ARG_WANDB="${31:-'true'}"
+ARG_HF_TOKEN="${32:-""}"
+ARG_SAVE_CHECKPOINT_PATH="${33:-'checkpoints/${ARG_MODEL_NAME}_${ARG_METHOD}_${ARG_STRUCTURE}_lr${ARG_LORA_RANK}_sparsity${ARG_SPARSITY_RATIO}'}"
+ARG_OUTPUT_CSV_FILE="${34:-'results/results.csv'}"
+ARG_PARALLELISM="${35:-'data_parallel'}"
+ARG_FINETUNE_TOKEN_COUNT="${36:-300000}"
+ARG_WEIGHT_DECAY="${37:-1e-2}"
+ARG_FINE_TUNING_GLOBAL_BATCH_SIZE="${38:-128}"
+ARG_LEARNING_RATE="${39:-1e-5}"
+ARG_FINE_TUNING_SEQLEN="${40:-4096}"
+ARG_CLUSTER="${41:-'trillium'}" # 'trillium' or 'narval'
+
+
+SCRIPT_TO_RUN=scripts/run_slim_args.sh
+
+module load apptainer 
+export HF_DATASETS_TRUST_REMOTE_CODE="1"
+export HF_HOME="$SLURM_TMPDIR/data" 
+export MASTER_PORT=29501
+export OMP_NUM_THREADS=12
+
+mkdir -p "$HF_HOME"
+
+USERNAME=$(whoami)
+
+COPY_DATA=false
+
+
+module load apptainer 
+export HF_DATASETS_TRUST_REMOTE_CODE="1"
+export HF_HOME="$SLURM_TMPDIR/data" 
+export MASTER_PORT=29501
+export OMP_NUM_THREADS=12
+
+mkdir -p "$HF_HOME"
+
+USERNAME=$(whoami)
+
+
+if [ "$ARG_CLUSTER" = "trillium" ]; then
+    echo "Running on Trillium cluster"
+    CONTAINER_NAME=torch-jax
+    DATA_DIR_SRC="${SCRATCH}/data"
+    # Additional setup for Trillium can go here
+    SINGULARITY_CMD="singularity exec \
+        --fakeroot \
+        --bind $DATA_DIR_SRC:$PWD/data \
+        --bind $SCRATCH/tiled_models:$PWD/tiled_models \
+        --nv ${SCRATCH}/$CONTAINER_NAME.sif "
+elif [ "$ARG_CLUSTER" = "narval" ]; then
+    echo "Running on Narval cluster"
+    # --- Data and Container Preparation ---
+    if [ "$ARG_COPY_DATA" = true ]; then
+        echo "Copying data to SLURM_TMPDIR..."
+        DATA_DIR_SRC="/home/${USERNAME}/projects/def-mmehride/${USERNAME}/data"
+        DATA_DIR_TMP="$SLURM_TMPDIR/data"
+        cp -r "$DATA_DIR_SRC" "$SLURM_TMPDIR/"
+        echo "Data copied to $DATA_DIR_TMP"
+        CONTAINER_NAME=torch-one-shot
+
+        SINGULARITY_CMD="singularity exec \
+            --bind $PWD:/home/${USERNAME} \
+            --bind $SLURM_TMPDIR:/tmp \
+            --bind $DATA_DIR_TMP:/home/${USERNAME}/data \
+            --nv ${SLURM_TMPDIR}/$CONTAINER_NAME.sif "
+    else
+        echo "Skipping data copy as per user request."
+        DATA_DIR_TMP="/home/${USERNAME}/projects/def-mmehride/${USERNAME}/data" # Use the original data directory
+    fi
+    echo "Preparing container..."
+    rm -rf $SLURM_TMPDIR/torch-one-shot.sif;
+    mkdir ${SLURM_TMPDIR}/torch-one-shot.sif;
+    tar -xf /home/${USERNAME}/projects/def-mmehride/${USERNAME}/torch-one-shot.tar -C $SLURM_TMPDIR;
+    mkdir ${SLURM_TMPDIR}/torch-one-shot.sif/etc/pki;
+    mkdir ${SLURM_TMPDIR}/torch-one-shot.sif/etc/pki/tls;
+    mkdir ${SLURM_TMPDIR}/torch-one-shot.sif/etc/pki/tls/certs;
+    cp /etc/ssl/certs/ca-bundle.crt ${SLURM_TMPDIR}/torch-one-shot.sif/etc/pki/tls/certs/ca-bundle.crt;
+else
+    echo "Unknown cluster specified: $ARG_CLUSTER. Exiting."
+    exit 1
+fi
+    
+    
+bash ${SINGULARITY_CMD} \
+    bash "${SCRIPT_TO_RUN}" \
+    "${ARG_MODEL_NAME}" \
+    "${ARG_STRUCTURE}" \
+    "${ARG_SPARSITY_RATIO}" \
+    "${ARG_METHOD}" \
+    "${ARG_LORA_RANK}" \
+    "${ARG_SLIM_LORA}" \
+    "${ARG_SEPARATE_LORA}" \
+    "${ARG_QUANTIZE_LORA}" \
+    "${ARG_LORA_TILE_SIZE}" \
+    "${ARG_PAD_LORA}" \
+    "${ARG_CALIBRATION_DATASET}" \
+    "${ARG_NUM_CALIBRATION_SAMPLES}" \
+    "${ARG_QUANTIZE_WEIGHT}" \
+    "${ARG_BITWIDTH}" \
+    "${ARG_TILED_WEIGHT_QUANTIZATION}" \
+    "${ARG_WEIGHT_TILE_SIZE}" \
+    "${ARG_SLIM_QUANT}" \
+    "${ARG_LOCAL_FILES_ONLY}" \
+    "${ARG_EVAL_DATASET}" \
+    "${ARG_EVALUATE_PERPLEXITY}" \
+    "${ARG_TEST_LMHARNESS}" \
+    "${ARG_LM_HARNESS_TASKS}" \
+    "${ARG_FINE_TUNE}" \
+    "${ARG_OPTIMIZER}" \
+    "${ARG_SCALE_IMPORTANT_WEIGHTS}" \
+    "${ARG_MASKLLM_CHECKPOINT}" \
+    "${ARG_QUANTIZE_INPUT}" \
+    "${ARG_INPUT_BITWIDTH}" \
+    "${ARG_INPUT_GROUP_SIZE}" \
+    "${ARG_JOINT_PQ_MIXING_FACTOR}" \
+    "${ARG_WANDB}" \
+    "${ARG_HF_TOKEN}" \
+    "${ARG_SAVE_CHECKPOINT_PATH}" \
+    "${ARG_OUTPUT_CSV_FILE}" \
+    "${ARG_PARALLELISM}" \
+    "${ARG_FINETUNE_TOKEN_COUNT}" \
+    "${ARG_WEIGHT_DECAY}" \
+    "${ARG_FINE_TUNING_GLOBAL_BATCH_SIZE}" \
+    "${ARG_LEARNING_RATE}" \
+    "${ARG_FINE_TUNING_SEQLEN}"
+
+echo $ARG_WANDB
+
+echo "Singularity execution finished successfully."
+echo "SLURM Job $SLURM_JOB_ID finished at $(date)"
